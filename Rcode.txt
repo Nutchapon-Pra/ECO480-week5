@@ -1,0 +1,142 @@
+##Install necessary packages
+install.packages(c("readxl", "tidyverse","mosaic", "readstata13","Rcpp"))
+library(readxl)
+library(tidyverse)
+library(mosaic)
+library(readstata13)
+
+##Importing the data file into R
+library(readxl)
+library(tidyverse)
+
+# Set your working directory to the correct folder.
+# Insert your file path for 'YOURFILEPATH'.
+setwd("/cloud/project")
+
+var_info <- read_excel("Dataset Project 3.xlsx", sheet = "Data Dictionary")
+dat <- read_excel("Dataset Project 3.xlsx", sheet = "Data")
+str(dat)
+
+dat$type <- factor(dat$type)
+dat$taxed <- factor(dat$taxed, labels = c("not taxed", "taxed"))
+dat$supp <- factor(dat$supp, labels = c("Standard", "Supplemental"))
+dat$store_id <- factor(dat$store_id)
+dat$store_type <- factor(dat$store_type, labels = c("Large Supermarket","Small Supermarket","Pharmacy", "Gas Station"))
+dat$type2 <- factor(dat$type2)
+dat$product_id <- factor(dat$product_id)
+unique(dat$time)
+# Selects all observations with “time” equal to "MAR2015".
+dat$time[dat$time == "MAR2015"] <- "MAR2016"
+dat$time <- factor(dat$time)
+
+##Counting the number of unique elements in a variable
+no_stores <- length(unique(dat$store_id))
+no_products <- length(unique(dat$product_id))
+paste("Stores:", no_stores)
+paste("Products:", no_products)
+
+##Creating frequency tables
+#Frequency table for store type and time period
+library(mosaic)
+tally(~store_type + time, data = dat, margins = TRUE, format = "count")
+tally(~store_type + taxed + time, data = dat, margins = TRUE, format = "count")
+
+#Frequency table for store type and taxed
+tally(~store_type + taxed + time, data = dat, margins = TRUE, format = "count")
+
+#Frequency table for product type and time period
+tally(~type + time, data = dat, margins = TRUE, format = "count")
+
+##Calculating conditional means
+dat$period_test <- NA
+
+# List of all store IDs
+sid_list = unique(dat$store_id)
+
+# List of all product IDs
+pid_list = unique(dat$product_id)
+
+for (s in sid_list) {
+  for (p in pid_list) {
+    temp <- subset(dat, product_id == p & store_id == s)
+    temp_time <- temp$time
+    test <- (
+      any(temp_time == "DEC2014") & 
+        any(temp_time == "JUN2015") &
+        any(temp_time == "MAR2016"))
+    dat$period_test[dat$product_id == p & 
+                      dat$store_id == s] <- test
+  }
+}
+
+dat_c <- subset(dat,(period_test == TRUE & supp == "Standard"))
+
+table_res <- dat_c %>%
+  group_by(taxed, store_type, time) %>%
+  summarize(n = length(price_per_oz),
+            avg.price = mean(price_per_oz)) %>%
+  spread(time, avg.price) %>%  
+  print()
+
+##Making a column chart to compare two groups
+#Calculate price differences by store type
+table_res$D1 <- table_res$JUN2015 - table_res$DEC2014
+table_res$D2 <- table_res$MAR2016 - table_res$DEC2014
+print("Group Means")
+table_res
+
+#Plot a column chart for average price changes
+ggplot(table_res, 
+       aes(fill = taxed, y = D1, x = store_type)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  # Add the axes labels
+  labs(y = "Price change (US$/oz)", x = "Store type") +
+  # Add the title and legend labels
+  scale_fill_discrete(name = "Beverages", 
+                      labels = c("Non-taxed", "Taxed")) +
+  ggtitle("Average price change from Dec 2014 to Jun 2015")
+
+##Calculating the p-value for price changes
+p1 <- dat_c$price_per_oz[
+  dat_c$store_type == "Large Supermarket" &
+    dat_c$taxed == "taxed" &
+    dat_c$time == "DEC2014"]
+
+p2 <- dat_c$price_per_oz[
+  dat_c$store_type == "Large Supermarket" &
+    dat_c$taxed == "taxed" &
+    dat_c$time == "JUN2015"]
+
+# Price difference for taxed products
+d_t <- p2 - p1
+
+p1_alt <- dat_c[
+  dat_c$store_type == "Large Supermarket" &
+    dat_c$taxed == "taxed" &
+    dat_c$time == "DEC2014",
+  c("product_id", "store_id", "price_per_oz")]
+
+p2_alt <- dat_c[
+  dat_c$store_type == "Large Supermarket" &
+    dat_c$taxed == "taxed" &
+    dat_c$time == "JUN2015",
+  c("product_id", "store_id", "price_per_oz")]
+
+#Perform t-test
+t <- mean(d_t) / sqrt(var(d_t) / (length(d_t)))
+# Recognize that the differences come from paired samples.
+t.test(p2, p1, paired = TRUE)
+
+p1 <- dat_c$price_per_oz[
+  dat_c$store_type == "Large Supermarket" & 
+    dat_c$taxed == "not taxed" & dat_c$time == "DEC2014"]
+
+p2 <- dat_c$price_per_oz[
+  dat_c$store_type == "Large Supermarket" & 
+    dat_c$taxed == "not taxed" & dat_c$time == "JUN2015"]
+
+d_nt <- p2 - p1
+
+t.test(p2, p1, paired = TRUE)
+
+t.test(d_t,d_nt)
